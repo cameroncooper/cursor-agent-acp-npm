@@ -154,9 +154,8 @@ export class CursorAgentImplementation implements Agent {
     this.logger.debug('Agent.authenticate called', { params });
 
     try {
-      // Currently not implemented - no authentication required
-      this.logger.info('Authentication not required for this agent');
-      return undefined;
+      const result = await this.adapter.handleAuthenticateFromAgent(params);
+      return result;
     } catch (error) {
       this.logger.error('Agent.authenticate failed', { error, params });
       throw error;

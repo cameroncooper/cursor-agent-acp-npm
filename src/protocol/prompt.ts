@@ -7,6 +7,7 @@
 
 import type {
   ContentBlock,
+  Implementation,
   PromptRequest,
   PromptResponse,
   PlanEntry,
@@ -28,6 +29,7 @@ import {
 import { toRequestId, createSuccessResponse } from '../utils/json-rpc';
 import type { SessionManager } from '../session/manager';
 import type { CursorCliBridge } from '../cursor/cli-bridge';
+import { isZedClient } from '../cursor/auth';
 import { ContentProcessor } from './content';
 
 // Stop reason constants per ACP spec
@@ -51,6 +53,7 @@ export interface PromptHandlerOptions {
     params?: any;
   }) => void;
   slashCommandsRegistry?: SlashCommandsRegistry;
+  getClientInfo?: (() => Implementation | null) | undefined;
 }
 
 export interface StreamOptions {
@@ -134,6 +137,7 @@ export class PromptHandler {
     params?: any;
   }) => void;
   private readonly slashCommandsRegistry: SlashCommandsRegistry | undefined;
+  private readonly getClientInfo: (() => Implementation | null) | undefined;
   // Processing configuration
   private readonly processingConfig: PromptProcessingConfig = {
     echoUserMessages: true,
@@ -150,10 +154,19 @@ export class PromptHandler {
     this.logger = options.logger;
     this.sendNotification = options.sendNotification;
     this.slashCommandsRegistry = options.slashCommandsRegistry;
+    this.getClientInfo = options.getClientInfo;
     this.contentProcessor = new ContentProcessor({
       config: this.config,
       logger: this.logger,
     });
+  }
+
+  private shouldEchoUserMessages(): boolean {
+    if (!this.processingConfig.echoUserMessages) {
+      return false;
+    }
+
+    return !isZedClient(this.getClientInfo?.() || null);
   }
 
   /**
@@ -357,7 +370,7 @@ export class PromptHandler {
    * Agent SHOULD echo user messages via user_message_chunk
    */
   private echoUserMessage(sessionId: string, content: ContentBlock[]): void {
-    if (!this.processingConfig.echoUserMessages) {
+    if (!this.shouldEchoUserMessages()) {
       return;
     }
 

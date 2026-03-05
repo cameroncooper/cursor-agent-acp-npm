@@ -321,7 +321,11 @@ describe('CursorAgentAdapter Integration', () => {
           response.result.agentCapabilities.promptCapabilities
         ).toBeDefined();
         expect(response.result.agentCapabilities.mcpCapabilities).toBeDefined();
-        expect(response.result.authMethods).toEqual([]);
+        expect(response.result.authMethods).toHaveLength(1);
+        expect(response.result.authMethods[0]).toMatchObject({
+          id: 'cursor-agent-login',
+          name: 'Login',
+        });
       });
 
       it('should reject invalid protocol version', async () => {

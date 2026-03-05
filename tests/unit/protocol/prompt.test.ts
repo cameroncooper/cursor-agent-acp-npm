@@ -281,6 +281,33 @@ describe('PromptHandler', () => {
           }),
         });
       });
+
+      it('should not echo user messages for Zed clients', async () => {
+        const zedPromptHandler = new PromptHandler({
+          sessionManager: mockSessionManager as any,
+          cursorBridge: mockCursorBridge as any,
+          config: mockConfig,
+          logger: mockLogger,
+          sendNotification: mockSendNotification,
+          slashCommandsRegistry: mockSlashCommandsRegistry,
+          getClientInfo: () => ({
+            name: 'zed',
+            version: '0.0.0-test',
+          }),
+        });
+
+        await zedPromptHandler.processPrompt(validRequest);
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const userMessageUpdates = mockSendNotification.mock.calls.filter(
+          ([notification]) =>
+            notification.method === 'session/update' &&
+            notification.params?.update?.sessionUpdate === 'user_message_chunk'
+        );
+
+        expect(userMessageUpdates).toHaveLength(0);
+      });
     });
 
     describe('streaming prompts', () => {

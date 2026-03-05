@@ -8,11 +8,14 @@
  * - Stdio transport handling (per ACP spec)
  */
 
+import { createRequire } from 'module';
 import {
   AgentSideConnection,
   ndJsonStream,
   type InitializeRequest,
   type InitializeResponse,
+  type AuthenticateRequest,
+  type AuthenticateResponse,
   type NewSessionRequest,
   type NewSessionResponse,
   type LoadSessionRequest,
@@ -68,6 +71,12 @@ import { AcpFileSystemClient } from '../client/filesystem-client';
 import { FilesystemToolProvider } from '../tools/filesystem';
 import { SlashCommandsRegistry } from '../tools/slash-commands';
 import { ExtensionRegistry } from '../tools/extension-registry';
+import {
+  CURSOR_AGENT_LOGIN_AUTH_METHOD_ID,
+  getCursorAuthenticationMessage,
+} from '../cursor/auth';
+
+const nodeRequire = createRequire(__filename);
 
 export class CursorAgentAdapter implements ClientConnection {
   private config: AdapterConfig;
@@ -606,6 +615,7 @@ export class CursorAgentAdapter implements ClientConnection {
       logger: this.logger,
       sendNotification: this.sendNotification.bind(this),
       slashCommandsRegistry: this.slashCommandsRegistry,
+      getClientInfo: () => this.initializationHandler?.getClientInfo() || null,
     });
 
     // Initialize ACP-compliant file system client
@@ -1845,6 +1855,8 @@ export class CursorAgentAdapter implements ClientConnection {
   async handleNewSessionFromAgent(
     params: NewSessionRequest
   ): Promise<NewSessionResponse> {
+    await this.requireCursorAuthenticationForAgentOperation();
+
     const response = await this.handleSessionNew({
       jsonrpc: '2.0',
       id: '1',
@@ -1861,6 +1873,8 @@ export class CursorAgentAdapter implements ClientConnection {
   async handleLoadSessionFromAgent(
     params: LoadSessionRequest
   ): Promise<LoadSessionResponse> {
+    await this.requireCursorAuthenticationForAgentOperation();
+
     const response = await this.handleSessionLoad({
       jsonrpc: '2.0',
       id: '1',
@@ -1982,9 +1996,40 @@ export class CursorAgentAdapter implements ClientConnection {
   }
 
   /**
+   * Handle authenticate from Agent implementation.
+   *
+   * Cursor authentication is performed via the advertised terminal-auth flow.
+   * This method validates the auth method and returns success only after the
+   * external login flow has already completed.
+   */
+  async handleAuthenticateFromAgent(
+    params: AuthenticateRequest
+  ): Promise<AuthenticateResponse> {
+    if (params.methodId !== CURSOR_AGENT_LOGIN_AUTH_METHOD_ID) {
+      const RequestError = await this.getRequestErrorClass();
+      throw RequestError.invalidParams(
+        { methodId: params.methodId },
+        `Unsupported auth method: ${params.methodId}`
+      );
+    }
+
+    await this.requireCursorAuthenticationForAgentOperation();
+
+    return {
+      _meta: {
+        authenticated: true,
+        methodId: params.methodId,
+        verifiedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  /**
    * Handle prompt from Agent implementation
    */
   async handlePromptFromAgent(params: PromptRequest): Promise<PromptResponse> {
+    await this.requireCursorAuthenticationForAgentOperation();
+
     const response = await this.handleSessionPrompt({
       jsonrpc: '2.0',
       id: '1',
@@ -2005,6 +2050,82 @@ export class CursorAgentAdapter implements ClientConnection {
       method: 'session/cancel',
       params,
     } as unknown as AnyRequest);
+  }
+
+  private async requireCursorAuthenticationForAgentOperation(): Promise<void> {
+    if (!this.cursorBridge) {
+      return;
+    }
+
+    try {
+      const authStatus = await this.cursorBridge.checkAuthentication();
+      if (authStatus.authenticated) {
+        return;
+      }
+
+      const RequestError = await this.getRequestErrorClass();
+      throw RequestError.authRequired(
+        { authMethodId: CURSOR_AGENT_LOGIN_AUTH_METHOD_ID },
+        getCursorAuthenticationMessage(authStatus.error)
+      );
+    } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'name' in error &&
+        error.name === 'RequestError' &&
+        'code' in error &&
+        typeof error.code === 'number'
+      ) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      const isNotFoundError =
+        message.includes('ENOENT') ||
+        message.includes('not found') ||
+        message.includes('command not found') ||
+        message.includes('spawn cursor-agent ENOENT');
+
+      if (isNotFoundError) {
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  private async getRequestErrorClass(): Promise<{
+    invalidParams: (
+      data?: unknown,
+      additionalMessage?: string
+    ) => Error & { code: number };
+    authRequired: (
+      data?: unknown,
+      additionalMessage?: string
+    ) => Error & { code: number };
+  }> {
+    const sdkModule = nodeRequire('@agentclientprotocol/sdk') as {
+      RequestError?: unknown;
+      default?: { RequestError?: unknown };
+    };
+    const requestError =
+      sdkModule.RequestError || sdkModule.default?.RequestError;
+
+    if (!requestError) {
+      throw new Error('ACP SDK RequestError export is unavailable');
+    }
+
+    return requestError as {
+      invalidParams: (
+        data?: unknown,
+        additionalMessage?: string
+      ) => Error & { code: number };
+      authRequired: (
+        data?: unknown,
+        additionalMessage?: string
+      ) => Error & { code: number };
+    };
   }
 
   private async cleanup(): Promise<void> {

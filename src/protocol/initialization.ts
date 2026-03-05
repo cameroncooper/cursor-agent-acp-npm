@@ -25,6 +25,7 @@ import {
   type ConnectivityTestResult,
   type CursorAuthStatus,
 } from '../types';
+import { buildCursorTerminalAuthMethod } from '../cursor/auth';
 
 /**
  * Configuration options for initialization behavior
@@ -351,7 +352,7 @@ export class InitializationHandler {
       metrics.capabilityBuildTime = Date.now() - buildStart;
 
       // Build authentication methods (currently none required)
-      const authMethods = this.buildAuthMethods();
+      const authMethods = this.buildAuthMethods(connectivityTest);
 
       // Calculate total time and check for performance issues
       metrics.totalTime = Date.now() - startTime;
@@ -933,20 +934,16 @@ export class InitializationHandler {
    * Builds authentication methods supported by this agent
    * Per ACP spec: https://agentclientprotocol.com/protocol/authentication
    */
-  private buildAuthMethods(): AuthMethod[] {
-    // Currently no authentication required
-    // Per ACP spec: authMethods is an array of supported authentication methods
-    // Empty array indicates no authentication is required
+  private buildAuthMethods(
+    connectivityResult?: ConnectivityTestResult
+  ): AuthMethod[] {
+    // Advertise Cursor login whenever the CLI is available so ACP clients
+    // can launch an interactive auth flow on demand.
+    if (!connectivityResult?.success) {
+      return [];
+    }
 
-    // Future: Add API key, OAuth, or other auth methods here
-    // Example for future API key auth:
-    // return [{
-    //   id: 'api-key',
-    //   name: 'API Key Authentication',
-    //   description: 'Authenticate using a Cursor API key',
-    // }];
-
-    return [];
+    return [buildCursorTerminalAuthMethod()];
   }
 
   /**

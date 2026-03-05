@@ -252,6 +252,11 @@ describe('InitializationHandler', () => {
       );
       expect(result._meta?.cursorAuthenticated).toBe(false);
       expect(result._meta?.cursorVersion).toBe('1.2.3');
+      expect(result.authMethods).toHaveLength(1);
+      expect(result.authMethods[0]).toMatchObject({
+        id: 'cursor-agent-login',
+        name: 'Login',
+      });
     });
 
     it('should succeed when cursor-agent is available and authenticated', async () => {
@@ -273,6 +278,15 @@ describe('InitializationHandler', () => {
       // Assert
       expect(result).toBeDefined();
       expect(result.agentCapabilities).toBeDefined();
+      expect(result.authMethods).toHaveLength(1);
+      expect(result.authMethods[0]).toMatchObject({
+        id: 'cursor-agent-login',
+        name: 'Login',
+      });
+      expect(result.authMethods[0]?._meta?.['terminal-auth']).toMatchObject({
+        command: 'cursor-agent',
+        args: ['login'],
+      });
     });
 
     it('should handle initialization timeout gracefully', async () => {
